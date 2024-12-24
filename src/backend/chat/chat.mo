@@ -1,6 +1,6 @@
 import Prim "mo:⛔";
 import Map "mo:map/Map";
-// import Set "mo:map/Set";
+import Set "mo:map/Set";
 import { n32hash; phash } "mo:map/Map";
 import Text "mo:base/Text";
 import Array "mo:base/Array";
@@ -69,10 +69,14 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
         var usersPrehash = "";
         var index = 0;
         var senderIndex = 0;
+        let tempUsersSetToPreventDuplicates = Set.new<Principal>();
         for(user in (Array.sort<Principal>(sortedUsers, Principal.compare)).vals()){
-            usersPrehash #= Principal.toText(user);
-            if (user == sender) { senderIndex := index };
-            index += 1;
+            if (not Set.has<Principal>(tempUsersSetToPreventDuplicates, phash, user)) { 
+                ignore Set.put<Principal>(tempUsersSetToPreventDuplicates, phash, user);
+                usersPrehash #= Principal.toText(user);
+                if (user == sender) { senderIndex := index };
+                index += 1;
+            };   
         };
         let chatId = Text.hash(usersPrehash);
         {chatId; sortedUsers; senderIndex}
