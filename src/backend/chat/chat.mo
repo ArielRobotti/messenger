@@ -60,19 +60,21 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
     };
 
     func generateDataFromUsers(users: [Principal], sender: Principal): {chatId: Nat32; sortedUsers: [Principal]; senderIndex: Nat} {
-        let sortedUsers = Array.sort<Principal>(Prim.Array_tabulate<Principal>(
-                users.size() + 1,
-                func i = if(i == 0){sender} else {users[i -1]}
+        let usersSet = Set.fromIter<Principal>(users.vals(), phash);
+        let usersWithoutDuplicates = Set.toArray<Principal>(usersSet);
+        let sortedUsers = Array.sort<Principal>(
+            Prim.Array_tabulate<Principal>(
+                usersWithoutDuplicates.size() + 1, 
+                func i = if(i == 0){sender} else {usersWithoutDuplicates[i -1]}
             ),
             Principal.compare
         );
         var usersPrehash = "";
         var index = 0;
         var senderIndex = 0;
-        let tempUsersSetToPreventDuplicates = Set.new<Principal>();
+        
         for(user in (Array.sort<Principal>(sortedUsers, Principal.compare)).vals()){
-            if (not Set.has<Principal>(tempUsersSetToPreventDuplicates, phash, user)) { 
-                ignore Set.put<Principal>(tempUsersSetToPreventDuplicates, phash, user);
+            if (not Set.has<Principal>(usersSet, phash, user)) { 
                 usersPrehash #= Principal.toText(user);
                 if (user == sender) { senderIndex := index };
                 index += 1;
@@ -192,6 +194,26 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
             case ( ?chat ) {
                 if (not callerIncluded(caller, chat.users)) { return #Err };
                 #Ok(chat);
+            }
+        }
+    };
+
+    public shared ({ caller }) func readPaginateChat(id: ChatId, page: Nat): async Types.ReadChatResponse{
+        let chat = Map.get<ChatId, Chat>(chats, n32hash, id);
+        switch chat {
+            case null { #Err("Chat not found") };
+            case ( ?chat ) {
+                if (not callerIncluded(caller, chat.users)) { return #Err("Caller is not included in this chat") };
+                if (page == 0){
+                    let endSubArray = if (chat.msgs.size() > 10) { 10 } else { chat.msgs.size()};
+                    let msgs = Array.subArray<Msg>(chat.msgs, 0, endSubArray);
+                    let moreMsg = chat.msgs.size() > 10;
+                    return #Ok( #Start({msgs; users = chat.users; moreMsg}) )
+                } else {
+                    let length = if (chat.msgs.size() >= 10 * page + 10) { 10} else { chat.msgs.size() % 10};
+                    let msgs = Array.subArray<Msg>(chat.msgs, 10 * page, length);
+                    return #Ok( #OnlyMsgs( {msgs; moreMsg = chat.msgs.size() > 10 * page} ) )
+                }
             }
         }
     };
