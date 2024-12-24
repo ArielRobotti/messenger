@@ -1,14 +1,14 @@
 {
   "canisters": {
-    "messenger_backend": {
-      "main": "src/messenger_backend/main.mo",
+    "back": {
+      "main": "src/backend/main.mo",
       "type": "motoko"
     }
   },
   "defaults": {
     "build": {
       "args": "",
-      "packtool": ""
+      "packtool": "mops sources"
     }
   },
   "output_env_file": ".env",
