@@ -15,8 +15,13 @@ module {
         indexMsg: Nat;  // Para acceder en tiempo constante
     };
 
+    public type Participant = {
+        name: Text; 
+        principal:Principal
+    };
+
     public type Chat = { 
-        users : [{name: Text; principal:Principal}];
+        users : [Participant];
         msgs : [Msg]; // TODO Cambiar esta estructura por algo mas eficiente
     };
 
@@ -24,7 +29,7 @@ module {
         #Ok: {
             #Start: {
                 msgs: [Msg];
-                users: [{name: Text; principal:Principal}];
+                users: [Participant];
                 moreMsg: Bool;
             };
             #OnlyMsgs: {
@@ -33,5 +38,15 @@ module {
             }
         };
         #Err: Text;
+    };
+
+    public type Notice = MsgContent and {title: Text; date: Int};
+
+    public type DiffusionChannel = {
+        admin: Principal; // o admins [Principal]
+        publicAccess: Bool;
+        name: Text;
+        users: [Participant];
+        msgs: [Notice];
     }
 };

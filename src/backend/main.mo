@@ -1,21 +1,16 @@
 import Types "types";
 import Map "mo:map/Map";
-// import Set "mo:map/Set";
 // import { now } "mo:base/Time";
 import { phash} "mo:map/Map";
 import Principal "mo:base/Principal";
-// import Buffer "mo:base/Buffer";
 import Prim "mo:⛔";
 import ChatManager "./chat/chat";
+import Canister_Manager "./interfaces/ic-management-interface";
 
 // import { print } "mo:base/Debug";
-// import Array "mo:base/Array";
-// import Blob "mo:base/Blob";
-// import Nat8 "mo:base/Nat8";
-// import Nat "mo:base/Nat";
 import Text "mo:base/Text";
 
-actor {
+shared ({caller = DEPLOYER}) actor class Main() = this {
 
     type UserDataInit = Types.UserDataInit;
     type User = Types.User;
@@ -29,6 +24,7 @@ actor {
         assert(Principal.fromActor(CHAT_MANAGER) == Principal.fromText("aaaaa-aa"));
         Prim.cyclesAdd<system>(200_000_000_000);
         CHAT_MANAGER := await ChatManager.ChatManager();
+        await Canister_Manager.addController(Principal.fromActor(CHAT_MANAGER), DEPLOYER);
         Principal.fromActor(CHAT_MANAGER);
     };
 

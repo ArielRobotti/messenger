@@ -1,7 +1,7 @@
 import Prim "mo:⛔";
 import Map "mo:map/Map";
 import Set "mo:map/Set";
-import { n32hash; phash } "mo:map/Map";
+import { nhash; n32hash; phash } "mo:map/Map";
 import Text "mo:base/Text";
 import Array "mo:base/Array";
 import Principal "mo:base/Principal";
@@ -13,6 +13,9 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
 
     type ChatId = Types.ChatId;
     type Chat = Types.Chat;
+    type DiffusionChannel = Types.DiffusionChannel;
+    type Notice = Types.Notice;
+    type Participant = Types.Participant;
     type MsgContent = Types.MsgContent;
     type Msg = Types.Msg;
     type Notification = GlobalTypes.Notification;
@@ -20,6 +23,9 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
 
     let userNames = Map.new<Principal, Text>(); 
     stable let chats = Map.new<ChatId, Chat>();
+    stable let diffusionChannels = Map.new<Nat, DiffusionChannel>();
+    stable var lastChannelId = 0;
+
     stable let CANISTER_MAIN = actor(Principal.toText(DEPLOYER)):  actor {
         pushNotificationFromChatCanister: shared (Notification, [Principal]) -> async {#Ok; #Err};
     };
@@ -102,14 +108,14 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
 
   ///////////////////////////////////// Chat /////////////////////////////////
 
-    public shared ({ caller = sender }) func sendMsg(principalUsers: [Principal], msgContent: MsgContent ): async {#Ok: ChatId; #Err} {
-        assert(isUser(sender));
-        let user = Map.get<Principal, Text>(userNames, phash, sender);
+    public shared ({ caller = principal }) func sendMsg(principalUsers: [Principal], msgContent: MsgContent ): async {#Ok: ChatId; #Err} {
+        assert(isUser(principal));
+        let user = Map.get<Principal, Text>(userNames, phash, principal);
         switch user {
             case null {#Err};
             case ( ?user ) {
 
-                let {chatId; sortedUsers; senderIndex} = generateDataFromUsers(principalUsers, sender);
+                let {chatId; sortedUsers; senderIndex} = generateDataFromUsers(principalUsers, principal);
                 let chat = Map.get<ChatId, Chat>(chats, n32hash, chatId);
                 switch chat {
                     case null {
@@ -129,10 +135,11 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
                         ignore Map.put<ChatId, Chat>(chats, n32hash, chatId, {chat with msgs = updateMsgs});
                     }
                 };
+                let sender = {name = user; principal};
                 let notification = {
                     date = now();
                     kind = #Msg({
-                      sender;
+                      sender with
                       nameSender = user;
                       chatId;} 
                     )
@@ -143,14 +150,14 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
         };
     };
 
-    public shared ({ caller }) func putMsgToChat(chatId: Nat32, msgContent: MsgContent): async {#Ok; #Err: Text} {
+    public shared ({ caller = principal }) func putMsgToChat(chatId: Nat32, msgContent: MsgContent): async {#Ok; #Err: Text} {
         let chat = Map.get<ChatId, Chat>(chats, n32hash, chatId);
         switch chat {
             case null { #Err("Chat not found") };
             case (?chat) {
                 let senderIndex = indexOf<Principal>(
-                    caller,
-                    Array.map<{name: Text; principal:Principal}, Principal>(
+                    principal,
+                    Array.map<Types.Participant, Principal>(
                         chat.users, 
                         func x = x.principal
                     ), 
@@ -165,18 +172,15 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
                             func i = if(i == 0) { msg } else { chat.msgs[i-1] }
                         );
                         ignore Map.put<ChatId, Chat>(chats, n32hash, chatId, {chat with msgs = updateMsgs});
+                        let sender = {name = chat.users[senderIndex].name; principal};
                         let notification = {
                             date = now();
-                            kind = #Msg({
-                            sender = caller;
-                            nameSender = chat.users[senderIndex].name;
-                            chatId;} 
-                            )
+                            kind = #Msg({ sender with chatId;})
                         };
                         let usersPrincipal = Array.map<{name: Text; principal:Principal}, Principal>(
                                 chat.users, 
                                 func x = x.principal
-                            );
+                        );
                         ignore await CANISTER_MAIN.pushNotificationFromChatCanister(notification, usersPrincipal);
                         #Ok
                     }
@@ -205,8 +209,8 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
             case ( ?chat ) {
                 if (not callerIncluded(caller, chat.users)) { return #Err("Caller is not included in this chat") };
                 if (page == 0){
-                    let endSubArray = if (chat.msgs.size() > 10) { 10 } else { chat.msgs.size()};
-                    let msgs = Array.subArray<Msg>(chat.msgs, 0, endSubArray);
+                    let length = if (chat.msgs.size() > 10) { 10 } else { chat.msgs.size()};
+                    let msgs = Array.subArray<Msg>(chat.msgs, 0, length);
                     let moreMsg = chat.msgs.size() > 10;
                     return #Ok( #Start({msgs; users = chat.users; moreMsg}) )
                 } else {
@@ -217,6 +221,44 @@ shared ({ caller = DEPLOYER }) actor class ChatManager() = this {
             }
         }
     };
+  ///////////////////////////////// Diffusion //////////////////////////////////
+    
+    public shared ({ caller }) func createDiffusionChannel({users: [Participant]; name: Text; publicAccess: Bool }): async {#Ok: Nat; #Err: Text} {
+        assert(isUser(caller));
+        let admin = caller;
+        let channel = {admin; name; users; msgs: [Notice] = []; publicAccess};
+        lastChannelId += 1;
+        ignore Map.put<Nat, DiffusionChannel>(diffusionChannels, nhash, lastChannelId, channel);
+        #Ok(lastChannelId)
+    };
 
+    // public shared ({ caller }) func addParticipantToChannel(channelId: Nat, participant: Princip): async {
+    // };
 
+    public shared ({ caller }) func communicate({channelId: Nat; title: Text; noticeContent: MsgContent} ): async { #Ok; #Err: Text } {
+        let channel = Map.get<Nat, DiffusionChannel>(diffusionChannels, nhash, channelId);
+        switch channel {
+            case null { #Err("Diffusion channel Error") };
+            case (?channel) {
+                if(caller != channel.admin) { return #Err("Caller is not admin channel") };
+                let announcementsUpdate = Prim.Array_tabulate<Notice>(
+                    channel.msgs.size() + 1,
+                    func i = if(i == 0) { {noticeContent with date = now(); title} } else { channel.msgs[i-1] }
+                );
+                ignore Map.put<Nat, DiffusionChannel>(diffusionChannels, nhash, channelId, {channel with msgs = announcementsUpdate});
+
+                let notification: Notification = { date = now(); kind = #Diffusion({channelId}) };
+                ignore await CANISTER_MAIN.pushNotificationFromChatCanister(
+                    notification, 
+                    Array.map<Types.Participant, Principal>(
+                        channel.users, 
+                        func x = x.principal
+                    )
+                );
+                return #Ok
+            };
+        };
+
+    };
+    
 }

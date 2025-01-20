@@ -21,10 +21,17 @@ module {
         chats: [ChatId];
         notifications: [Notification];
     };
+
+    public type Sender = {
+        name: Text;
+        principal: Principal;   
+    };
+
     public type Notification = {
         date: Int;
         kind: {
-            #Msg: {nameSender: Text; sender: Principal; chatId: ChatId};
+            #Msg: Sender and {chatId: ChatId};
+            #Diffusion: {channelId: Nat};
             #ContactRequest: User;
             #ContactAccepted: User
         } 
